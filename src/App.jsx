@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -8,24 +8,25 @@ const supabase = createClient(
 
 function App() {
   const [session, setSession] = useState(null);
+  const [darkMode, setDarkMode] = useState(false);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [boatName, setBoatName] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [bookingDate, setBookingDate] = useState("");
+  const [price, setPrice] = useState("");
+
   const [bookings, setBookings] = useState([]);
   const [editingId, setEditingId] = useState(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-    });
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
 
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-      },
+      (_event, session) => setSession(session),
     );
 
     return () => listener.subscription.unsubscribe();
@@ -38,7 +39,7 @@ function App() {
   async function signUp() {
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) alert(error.message);
-    else alert("Account created! Now log in.");
+    else alert("Account created. Now log in.");
   }
 
   async function signIn() {
@@ -46,7 +47,6 @@ function App() {
       email,
       password,
     });
-
     if (error) alert(error.message);
   }
 
@@ -61,52 +61,34 @@ function App() {
       .select("*")
       .order("id", { ascending: false });
 
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
+    if (error) return alert(error.message);
     setBookings(data || []);
   }
 
   async function handleSubmit(e) {
     e.preventDefault();
 
-    if (editingId) {
-      const { error } = await supabase
-        .from("bookings")
-        .update({
-          boat_name: boatName,
-          customer_name: customerName,
-          booking_date: bookingDate,
-        })
-        .eq("id", editingId);
+    const booking = {
+      boat_name: boatName,
+      customer_name: customerName,
+      booking_date: bookingDate,
+      price: Number(price || 0),
+      user_id: session.user.id,
+    };
 
-      if (error) {
-        alert(error.message);
-        return;
-      }
+    const query = editingId
+      ? supabase.from("bookings").update(booking).eq("id", editingId)
+      : supabase.from("bookings").insert([booking]);
 
-      setEditingId(null);
-    } else {
-      const { error } = await supabase.from("bookings").insert([
-        {
-          boat_name: boatName,
-          customer_name: customerName,
-          booking_date: bookingDate,
-          user_id: session.user.id,
-        },
-      ]);
+    const { error } = await query;
 
-      if (error) {
-        alert(error.message);
-        return;
-      }
-    }
+    if (error) return alert(error.message);
 
     setBoatName("");
     setCustomerName("");
     setBookingDate("");
+    setPrice("");
+    setEditingId(null);
     fetchBookings();
   }
 
@@ -115,56 +97,71 @@ function App() {
     setBoatName(booking.boat_name);
     setCustomerName(booking.customer_name);
     setBookingDate(booking.booking_date);
+    setPrice(booking.price || "");
   }
 
   async function deleteBooking(id) {
-    if (!window.confirm("Delete this booking?")) return;
+    if (!confirm("Delete this booking?")) return;
 
     const { error } = await supabase.from("bookings").delete().eq("id", id);
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
+    if (error) return alert(error.message);
 
     fetchBookings();
   }
 
-  function cancelEdit() {
-    setEditingId(null);
-    setBoatName("");
-    setCustomerName("");
-    setBookingDate("");
-  }
+  const filteredBookings = useMemo(() => {
+    return bookings.filter((booking) => {
+      const text =
+        `${booking.boat_name} ${booking.customer_name} ${booking.booking_date}`.toLowerCase();
+      return text.includes(search.toLowerCase());
+    });
+  }, [bookings, search]);
+
+  const totalRevenue = bookings.reduce(
+    (sum, booking) => sum + Number(booking.price || 0),
+    0,
+  );
+
+  const upcomingBookings = bookings.filter(
+    (booking) => new Date(booking.booking_date) >= new Date(),
+  ).length;
+
+  const theme = darkMode ? dark : light;
 
   if (!session) {
     return (
-      <div style={styles.loginPage}>
-        <div style={styles.loginCard}>
+      <div style={{ ...styles.loginPage, background: theme.loginBackground }}>
+        <div
+          style={{
+            ...styles.loginCard,
+            background: theme.card,
+            color: theme.text,
+          }}
+        >
           <div style={styles.logo}>⚓</div>
-          <h1 style={styles.loginTitle}>Marina Management</h1>
-          <p style={styles.loginSubtitle}>Sign in to manage your bookings</p>
+          <h1>Marina Management</h1>
+          <p style={{ color: theme.muted }}>Sign in to manage your bookings</p>
 
           <input
+            style={styles.input}
             placeholder="Email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={styles.input}
           />
 
           <input
+            style={styles.input}
             type="password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={styles.input}
           />
 
-          <button onClick={signIn} style={styles.primaryButton}>
+          <button style={styles.primaryButton} onClick={signIn}>
             Login
           </button>
 
-          <button onClick={signUp} style={styles.secondaryButton}>
+          <button style={styles.secondaryButton} onClick={signUp}>
             Create Account
           </button>
         </div>
@@ -173,63 +170,98 @@ function App() {
   }
 
   return (
-    <div style={styles.page}>
-      <aside style={styles.sidebar}>
+    <div
+      style={{
+        ...styles.page,
+        background: theme.background,
+        color: theme.text,
+      }}
+    >
+      <aside style={{ ...styles.sidebar, background: theme.sidebar }}>
         <div>
           <h2 style={styles.brand}>⚓ Marina</h2>
-          <p style={styles.sidebarText}>Booking Dashboard</p>
+          <p style={styles.sidebarText}>Operations Dashboard</p>
         </div>
 
-        <button onClick={signOut} style={styles.logoutButton}>
-          Logout
-        </button>
+        <div>
+          <button
+            style={styles.darkButton}
+            onClick={() => setDarkMode(!darkMode)}
+          >
+            {darkMode ? "☀️ Light Mode" : "🌙 Dark Mode"}
+          </button>
+
+          <button style={styles.logoutButton} onClick={signOut}>
+            Logout
+          </button>
+        </div>
       </aside>
 
       <main style={styles.main}>
         <header style={styles.header}>
           <div>
             <h1 style={styles.title}>Marina Booking System</h1>
-            <p style={styles.subtitle}>Welcome, {session.user.email}</p>
-          </div>
-
-          <div style={styles.statCard}>
-            <span style={styles.statNumber}>{bookings.length}</span>
-            <span style={styles.statLabel}>Total Bookings</span>
+            <p style={{ ...styles.subtitle, color: theme.muted }}>
+              Welcome, {session.user.email}
+            </p>
           </div>
         </header>
 
+        <section style={styles.statsGrid}>
+          <StatCard
+            label="Total Bookings"
+            value={bookings.length}
+            theme={theme}
+          />
+          <StatCard label="Upcoming" value={upcomingBookings} theme={theme} />
+          <StatCard
+            label="Revenue"
+            value={`$${totalRevenue.toFixed(2)}`}
+            theme={theme}
+          />
+        </section>
+
         <section style={styles.grid}>
-          <div style={styles.card}>
+          <div style={{ ...styles.card, background: theme.card }}>
             <h2 style={styles.cardTitle}>
-              {editingId ? "Edit Booking" : "Add New Booking"}
+              {editingId ? "Edit Booking" : "Add Booking"}
             </h2>
 
             <form onSubmit={handleSubmit}>
               <label style={styles.label}>Boat Name</label>
               <input
+                style={styles.input}
                 placeholder="Example: Sea Breeze"
                 value={boatName}
                 onChange={(e) => setBoatName(e.target.value)}
-                style={styles.input}
                 required
               />
 
               <label style={styles.label}>Customer Name</label>
               <input
+                style={styles.input}
                 placeholder="Example: John Smith"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                style={styles.input}
                 required
               />
 
               <label style={styles.label}>Booking Date</label>
               <input
+                style={styles.input}
                 type="date"
                 value={bookingDate}
                 onChange={(e) => setBookingDate(e.target.value)}
-                style={styles.input}
                 required
+              />
+
+              <label style={styles.label}>Price</label>
+              <input
+                style={styles.input}
+                type="number"
+                placeholder="Example: 250"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
               />
 
               <button style={styles.primaryButton}>
@@ -239,8 +271,14 @@ function App() {
               {editingId && (
                 <button
                   type="button"
-                  onClick={cancelEdit}
                   style={styles.cancelButton}
+                  onClick={() => {
+                    setEditingId(null);
+                    setBoatName("");
+                    setCustomerName("");
+                    setBookingDate("");
+                    setPrice("");
+                  }}
                 >
                   Cancel Edit
                 </button>
@@ -248,35 +286,57 @@ function App() {
             </form>
           </div>
 
-          <div style={styles.card}>
-            <h2 style={styles.cardTitle}>Your Bookings</h2>
+          <div style={{ ...styles.card, background: theme.card }}>
+            <div style={styles.listHeader}>
+              <h2 style={styles.cardTitle}>Your Bookings</h2>
 
-            {bookings.length === 0 ? (
+              <input
+                style={styles.searchInput}
+                placeholder="Search bookings..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            {filteredBookings.length === 0 ? (
               <div style={styles.emptyState}>
-                <p>No bookings yet.</p>
-                <span>Add your first booking to get started.</span>
+                <p>No bookings found.</p>
               </div>
             ) : (
               <div style={styles.bookingList}>
-                {bookings.map((b) => (
-                  <div key={b.id} style={styles.bookingCard}>
+                {filteredBookings.map((booking) => (
+                  <div
+                    key={booking.id}
+                    style={{
+                      ...styles.bookingCard,
+                      background: theme.booking,
+                      borderColor: theme.border,
+                    }}
+                  >
                     <div>
-                      <h3 style={styles.bookingTitle}>{b.boat_name}</h3>
-                      <p style={styles.bookingInfo}>👤 {b.customer_name}</p>
-                      <p style={styles.bookingInfo}>📅 {b.booking_date}</p>
+                      <h3 style={styles.bookingTitle}>{booking.boat_name}</h3>
+                      <p style={{ ...styles.bookingInfo, color: theme.muted }}>
+                        👤 {booking.customer_name}
+                      </p>
+                      <p style={{ ...styles.bookingInfo, color: theme.muted }}>
+                        📅 {booking.booking_date}
+                      </p>
+                      <p style={{ ...styles.bookingInfo, color: theme.muted }}>
+                        💵 ${Number(booking.price || 0).toFixed(2)}
+                      </p>
                     </div>
 
                     <div style={styles.actions}>
                       <button
-                        onClick={() => startEdit(b)}
                         style={styles.editButton}
+                        onClick={() => startEdit(booking)}
                       >
                         Edit
                       </button>
 
                       <button
-                        onClick={() => deleteBooking(b.id)}
                         style={styles.deleteButton}
+                        onClick={() => deleteBooking(booking.id)}
                       >
                         Delete
                       </button>
@@ -292,216 +352,263 @@ function App() {
   );
 }
 
+function StatCard({ label, value, theme }) {
+  return (
+    <div style={{ ...styles.statCard, background: theme.card }}>
+      <span style={styles.statNumber}>{value}</span>
+      <span style={{ ...styles.statLabel, color: theme.muted }}>{label}</span>
+    </div>
+  );
+}
+
+const light = {
+  background: "linear-gradient(135deg, #eef6ff, #f8fafc)",
+  sidebar: "linear-gradient(180deg, #0f172a, #111827)",
+  card: "#ffffff",
+  booking: "#f8fafc",
+  text: "#0f172a",
+  muted: "#64748b",
+  border: "#e2e8f0",
+  loginBackground: "linear-gradient(135deg, #0f172a, #1d4ed8)",
+};
+
+const dark = {
+  background: "linear-gradient(135deg, #020617, #0f172a)",
+  sidebar: "linear-gradient(180deg, #020617, #111827)",
+  card: "#111827",
+  booking: "#1e293b",
+  text: "#f8fafc",
+  muted: "#cbd5e1",
+  border: "#334155",
+  loginBackground: "linear-gradient(135deg, #020617, #172554)",
+};
+
 const styles = {
   page: {
     minHeight: "100vh",
     display: "flex",
-    background: "#f1f5f9",
     fontFamily: "Arial, sans-serif",
-    color: "#0f172a",
   },
   sidebar: {
-    width: "240px",
-    background: "#0f172a",
+    width: "260px",
+    padding: "32px 24px",
     color: "white",
-    padding: "28px",
     display: "flex",
     flexDirection: "column",
     justifyContent: "space-between",
+    boxSizing: "border-box",
+    minHeight: "100vh",
   },
   brand: {
     margin: 0,
-    fontSize: "26px",
+    fontSize: "30px",
+    fontWeight: "800",
   },
   sidebarText: {
-    color: "#94a3b8",
-    marginTop: "8px",
+    color: "#cbd5e1",
+    fontSize: "16px",
   },
   main: {
     flex: 1,
-    padding: "36px",
+    padding: "44px",
+    boxSizing: "border-box",
   },
   header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
     marginBottom: "28px",
   },
   title: {
+    fontSize: "42px",
     margin: 0,
-    fontSize: "34px",
+    fontWeight: "800",
+    letterSpacing: "-1px",
   },
   subtitle: {
-    color: "#64748b",
+    fontSize: "18px",
     marginTop: "8px",
   },
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: "18px",
+    marginBottom: "28px",
+  },
   statCard: {
-    background: "white",
-    padding: "20px 28px",
-    borderRadius: "18px",
-    boxShadow: "0 10px 25px rgba(15,23,42,0.08)",
-    textAlign: "center",
+    padding: "24px",
+    borderRadius: "24px",
+    boxShadow: "0 18px 45px rgba(15,23,42,0.10)",
   },
   statNumber: {
     display: "block",
-    fontSize: "32px",
-    fontWeight: "bold",
+    fontSize: "34px",
+    fontWeight: "800",
     color: "#2563eb",
   },
   statLabel: {
-    color: "#64748b",
-    fontSize: "14px",
+    fontSize: "15px",
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: "380px 1fr",
-    gap: "24px",
+    gridTemplateColumns: "minmax(320px, 440px) 1fr",
+    gap: "28px",
   },
   card: {
-    background: "white",
-    padding: "26px",
-    borderRadius: "20px",
-    boxShadow: "0 10px 25px rgba(15,23,42,0.08)",
+    padding: "32px",
+    borderRadius: "28px",
+    boxShadow: "0 20px 50px rgba(15,23,42,0.10)",
   },
   cardTitle: {
     marginTop: 0,
-    marginBottom: "20px",
+    fontSize: "28px",
+    fontWeight: "800",
   },
   label: {
     display: "block",
-    marginBottom: "6px",
-    fontWeight: "bold",
-    fontSize: "14px",
+    fontWeight: "700",
+    marginBottom: "8px",
   },
   input: {
     width: "100%",
-    padding: "13px",
-    marginBottom: "16px",
-    borderRadius: "10px",
+    padding: "15px",
+    marginBottom: "18px",
+    borderRadius: "14px",
     border: "1px solid #cbd5e1",
-    fontSize: "15px",
+    fontSize: "16px",
+    boxSizing: "border-box",
+  },
+  searchInput: {
+    width: "100%",
+    padding: "14px",
+    borderRadius: "14px",
+    border: "1px solid #cbd5e1",
+    marginBottom: "20px",
+    fontSize: "16px",
     boxSizing: "border-box",
   },
   primaryButton: {
     width: "100%",
-    padding: "13px",
+    padding: "15px",
     border: "none",
-    borderRadius: "10px",
-    background: "#2563eb",
+    borderRadius: "14px",
+    background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
     color: "white",
-    fontWeight: "bold",
+    fontWeight: "800",
     cursor: "pointer",
-    fontSize: "15px",
-    marginTop: "4px",
+    fontSize: "16px",
   },
   secondaryButton: {
     width: "100%",
-    padding: "13px",
+    padding: "15px",
     border: "1px solid #cbd5e1",
-    borderRadius: "10px",
+    borderRadius: "14px",
     background: "white",
     color: "#0f172a",
-    fontWeight: "bold",
+    fontWeight: "800",
     cursor: "pointer",
-    fontSize: "15px",
-    marginTop: "10px",
+    fontSize: "16px",
+    marginTop: "12px",
   },
   cancelButton: {
     width: "100%",
-    padding: "13px",
+    padding: "15px",
     border: "none",
-    borderRadius: "10px",
+    borderRadius: "14px",
     background: "#94a3b8",
     color: "white",
-    fontWeight: "bold",
+    fontWeight: "800",
     cursor: "pointer",
-    fontSize: "15px",
-    marginTop: "10px",
+    fontSize: "16px",
+    marginTop: "12px",
+  },
+  darkButton: {
+    width: "100%",
+    padding: "13px",
+    marginBottom: "12px",
+    border: "1px solid rgba(255,255,255,0.2)",
+    borderRadius: "14px",
+    background: "rgba(255,255,255,0.08)",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: "800",
   },
   logoutButton: {
-    padding: "12px",
+    width: "100%",
+    padding: "14px",
     border: "none",
-    borderRadius: "10px",
+    borderRadius: "14px",
     background: "#ef4444",
     color: "white",
     cursor: "pointer",
-    fontWeight: "bold",
+    fontWeight: "800",
+  },
+  listHeader: {
+    marginBottom: "10px",
   },
   bookingList: {
     display: "grid",
-    gap: "14px",
+    gap: "18px",
   },
   bookingCard: {
-    background: "#f8fafc",
-    border: "1px solid #e2e8f0",
-    borderRadius: "16px",
-    padding: "18px",
+    border: "1px solid",
+    borderRadius: "22px",
+    padding: "22px",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: "18px",
   },
   bookingTitle: {
-    margin: "0 0 8px",
+    margin: "0 0 10px",
+    fontSize: "24px",
+    fontWeight: "800",
   },
   bookingInfo: {
-    margin: "4px 0",
-    color: "#475569",
+    margin: "6px 0",
+    fontSize: "16px",
   },
   actions: {
     display: "flex",
-    gap: "8px",
+    gap: "10px",
   },
   editButton: {
-    padding: "9px 12px",
+    padding: "10px 14px",
     border: "none",
-    borderRadius: "8px",
+    borderRadius: "10px",
     background: "#facc15",
     cursor: "pointer",
-    fontWeight: "bold",
+    fontWeight: "800",
   },
   deleteButton: {
-    padding: "9px 12px",
+    padding: "10px 14px",
     border: "none",
-    borderRadius: "8px",
+    borderRadius: "10px",
     background: "#ef4444",
     color: "white",
     cursor: "pointer",
-    fontWeight: "bold",
+    fontWeight: "800",
   },
   emptyState: {
-    background: "#f8fafc",
-    border: "1px dashed #cbd5e1",
-    padding: "28px",
-    borderRadius: "16px",
+    padding: "34px",
+    borderRadius: "22px",
     textAlign: "center",
     color: "#64748b",
+    border: "1px dashed #cbd5e1",
   },
   loginPage: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #0f172a, #1d4ed8)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     fontFamily: "Arial, sans-serif",
   },
   loginCard: {
-    width: "380px",
-    background: "white",
-    padding: "34px",
-    borderRadius: "24px",
-    boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+    width: "400px",
+    padding: "38px",
+    borderRadius: "28px",
+    boxShadow: "0 25px 70px rgba(0,0,0,0.28)",
     textAlign: "center",
   },
   logo: {
-    fontSize: "42px",
-    marginBottom: "10px",
-  },
-  loginTitle: {
-    margin: 0,
-  },
-  loginSubtitle: {
-    color: "#64748b",
-    marginBottom: "24px",
+    fontSize: "46px",
   },
 };
 
