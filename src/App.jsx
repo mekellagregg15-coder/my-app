@@ -19,6 +19,10 @@ function App() {
   const [price, setPrice] = useState("");
 
   const [bookings, setBookings] = useState([]);
+  const [allBookings, setAllBookings] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [role, setRole] = useState("user");
+
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState("");
 
@@ -33,8 +37,38 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (session) fetchBookings();
+    if (session) {
+      fetchBookings();
+      fetchProfile();
+    }
   }, [session]);
+
+  async function fetchProfile() {
+    const { data } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", session.user.id)
+      .single();
+
+    if (data) setRole(data.role);
+  }
+
+  async function fetchUsers() {
+    const { data, error } = await supabase.from("profiles").select("*");
+
+    if (error) return alert(error.message);
+    setUsers(data || []);
+  }
+
+  async function fetchAllBookings() {
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (error) return alert(error.message);
+    setAllBookings(data || []);
+  }
 
   async function signUp() {
     const { error } = await supabase.auth.signUp({ email, password });
@@ -47,12 +81,15 @@ function App() {
       email,
       password,
     });
+
     if (error) alert(error.message);
   }
 
   async function signOut() {
     await supabase.auth.signOut();
     setBookings([]);
+    setAllBookings([]);
+    setUsers([]);
   }
 
   async function fetchBookings() {
@@ -104,9 +141,11 @@ function App() {
     if (!confirm("Delete this booking?")) return;
 
     const { error } = await supabase.from("bookings").delete().eq("id", id);
+
     if (error) return alert(error.message);
 
     fetchBookings();
+    fetchAllBookings();
   }
 
   const filteredBookings = useMemo(() => {
@@ -181,6 +220,7 @@ function App() {
         <div>
           <h2 style={styles.brand}>⚓ Marina</h2>
           <p style={styles.sidebarText}>Operations Dashboard</p>
+          {role === "admin" && <p style={styles.adminBadge}>👑 Admin</p>}
         </div>
 
         <div>
@@ -202,7 +242,7 @@ function App() {
           <div>
             <h1 style={styles.title}>Marina Booking System</h1>
             <p style={{ ...styles.subtitle, color: theme.muted }}>
-              Welcome, {session.user.email}
+              Welcome, {session.user.email} {role === "admin" && "👑"}
             </p>
           </div>
         </header>
@@ -267,86 +307,113 @@ function App() {
               <button style={styles.primaryButton}>
                 {editingId ? "Update Booking" : "Add Booking"}
               </button>
-
-              {editingId && (
-                <button
-                  type="button"
-                  style={styles.cancelButton}
-                  onClick={() => {
-                    setEditingId(null);
-                    setBoatName("");
-                    setCustomerName("");
-                    setBookingDate("");
-                    setPrice("");
-                  }}
-                >
-                  Cancel Edit
-                </button>
-              )}
             </form>
           </div>
 
           <div style={{ ...styles.card, background: theme.card }}>
-            <div style={styles.listHeader}>
-              <h2 style={styles.cardTitle}>Your Bookings</h2>
+            <h2 style={styles.cardTitle}>Your Bookings</h2>
 
-              <input
-                style={styles.searchInput}
-                placeholder="Search bookings..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+            <input
+              style={styles.searchInput}
+              placeholder="Search bookings..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
 
-            {filteredBookings.length === 0 ? (
-              <div style={styles.emptyState}>
-                <p>No bookings found.</p>
-              </div>
-            ) : (
-              <div style={styles.bookingList}>
-                {filteredBookings.map((booking) => (
-                  <div
-                    key={booking.id}
-                    style={{
-                      ...styles.bookingCard,
-                      background: theme.booking,
-                      borderColor: theme.border,
-                    }}
-                  >
-                    <div>
-                      <h3 style={styles.bookingTitle}>{booking.boat_name}</h3>
-                      <p style={{ ...styles.bookingInfo, color: theme.muted }}>
-                        👤 {booking.customer_name}
-                      </p>
-                      <p style={{ ...styles.bookingInfo, color: theme.muted }}>
-                        📅 {booking.booking_date}
-                      </p>
-                      <p style={{ ...styles.bookingInfo, color: theme.muted }}>
-                        💵 ${Number(booking.price || 0).toFixed(2)}
-                      </p>
-                    </div>
-
-                    <div style={styles.actions}>
-                      <button
-                        style={styles.editButton}
-                        onClick={() => startEdit(booking)}
-                      >
-                        Edit
-                      </button>
-
-                      <button
-                        style={styles.deleteButton}
-                        onClick={() => deleteBooking(booking.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
+            <div style={styles.bookingList}>
+              {filteredBookings.map((booking) => (
+                <div
+                  key={booking.id}
+                  style={{
+                    ...styles.bookingCard,
+                    background: theme.booking,
+                    borderColor: theme.border,
+                  }}
+                >
+                  <div>
+                    <h3 style={styles.bookingTitle}>{booking.boat_name}</h3>
+                    <p style={{ ...styles.bookingInfo, color: theme.muted }}>
+                      👤 {booking.customer_name}
+                    </p>
+                    <p style={{ ...styles.bookingInfo, color: theme.muted }}>
+                      📅 {booking.booking_date}
+                    </p>
+                    <p style={{ ...styles.bookingInfo, color: theme.muted }}>
+                      💵 ${Number(booking.price || 0).toFixed(2)}
+                    </p>
                   </div>
-                ))}
-              </div>
-            )}
+
+                  <div style={styles.actions}>
+                    <button
+                      style={styles.editButton}
+                      onClick={() => startEdit(booking)}
+                    >
+                      Edit
+                    </button>
+
+                    <button
+                      style={styles.deleteButton}
+                      onClick={() => deleteBooking(booking.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
+
+        {role === "admin" && (
+          <section
+            style={{
+              ...styles.card,
+              background: theme.card,
+              marginTop: "28px",
+            }}
+          >
+            <h2 style={styles.cardTitle}>📊 Admin Panel</h2>
+
+            <div style={styles.adminButtons}>
+              <button style={styles.primaryButton} onClick={fetchUsers}>
+                Load Users
+              </button>
+
+              <button style={styles.primaryButton} onClick={fetchAllBookings}>
+                Load All Bookings
+              </button>
+            </div>
+
+            <h3>Users</h3>
+            {users.map((user) => (
+              <div
+                key={user.id}
+                style={{ ...styles.adminRow, borderColor: theme.border }}
+              >
+                <strong>{user.email}</strong>
+                <span>{user.role}</span>
+              </div>
+            ))}
+
+            <h3>All Bookings</h3>
+            {allBookings.map((booking) => (
+              <div
+                key={booking.id}
+                style={{ ...styles.adminRow, borderColor: theme.border }}
+              >
+                <span>
+                  <strong>{booking.boat_name}</strong> — {booking.customer_name}
+                </span>
+                <button
+                  style={styles.deleteButton}
+                  onClick={() => deleteBooking(booking.id)}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </section>
+        )}
       </main>
     </div>
   );
@@ -407,6 +474,15 @@ const styles = {
   sidebarText: {
     color: "#cbd5e1",
     fontSize: "16px",
+  },
+  adminBadge: {
+    background: "#facc15",
+    color: "#111827",
+    padding: "8px 12px",
+    borderRadius: "999px",
+    display: "inline-block",
+    fontWeight: "800",
+    marginTop: "12px",
   },
   main: {
     flex: 1,
@@ -507,18 +583,6 @@ const styles = {
     fontSize: "16px",
     marginTop: "12px",
   },
-  cancelButton: {
-    width: "100%",
-    padding: "15px",
-    border: "none",
-    borderRadius: "14px",
-    background: "#94a3b8",
-    color: "white",
-    fontWeight: "800",
-    cursor: "pointer",
-    fontSize: "16px",
-    marginTop: "12px",
-  },
   darkButton: {
     width: "100%",
     padding: "13px",
@@ -539,9 +603,6 @@ const styles = {
     color: "white",
     cursor: "pointer",
     fontWeight: "800",
-  },
-  listHeader: {
-    marginBottom: "10px",
   },
   bookingList: {
     display: "grid",
@@ -586,12 +647,20 @@ const styles = {
     cursor: "pointer",
     fontWeight: "800",
   },
-  emptyState: {
-    padding: "34px",
-    borderRadius: "22px",
-    textAlign: "center",
-    color: "#64748b",
-    border: "1px dashed #cbd5e1",
+  adminButtons: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "12px",
+    marginBottom: "24px",
+  },
+  adminRow: {
+    border: "1px solid",
+    padding: "14px",
+    borderRadius: "14px",
+    marginBottom: "10px",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
   },
   loginPage: {
     minHeight: "100vh",
